@@ -1,125 +1,103 @@
-import axios from "axios";
+import { createHttpClient } from "./httpClient";
 
-const BASE_URL = "http://localhost:8093/api/v1";
+/**
+ * Gọi installment-service qua API Gateway
+ * Public pattern:
+ *   http://localhost:8080/api/v1/installment/...
+ */
 
-// ========== AXIOS INSTANCE ==========
-const client = axios.create({
-  baseURL: BASE_URL,
-  timeout: 15000,
-});
+const GATEWAY_BASE_URL =
+  import.meta.env.VITE_GATEWAY_BASE_URL || "http://localhost:8080";
 
-// ========== API REQUESTS ==========
+const API_PREFIX =
+  import.meta.env.VITE_GATEWAY_API_PREFIX || "/api/v1";
 
-// 1. Lấy danh sách gói trả góp
+const INSTALLMENT_PREFIX =
+  import.meta.env.VITE_INSTALLMENT_PREFIX || "/installment";
+
+const client = createHttpClient(GATEWAY_BASE_URL);
+
+const gw = (path) => `${API_PREFIX}${INSTALLMENT_PREFIX}${path}`;
+
+// ================== API REQUESTS ==================
+
 export async function getPlans(token) {
-  const res = await client.get("/plans", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+  const res = await client.get(gw("/plans"), {
+    headers: { Authorization: `Bearer ${token}` },
   });
   return res.data;
 }
 
-// 2. Tạo gói trả góp
 export async function createPlan(token, payload) {
-  const res = await client.post("/plans", payload, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
+  const res = await client.post(gw("/plans"), payload, {
+    headers: { Authorization: `Bearer ${token}` },
   });
   return res.data;
 }
 
-// 2.1. Cập nhật gói trả góp
 export async function updatePlan(token, id, payload) {
-  const res = await client.put(`/plans/${id}`, payload, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
+  const res = await client.put(gw(`/plans/${id}`), payload, {
+    headers: { Authorization: `Bearer ${token}` },
   });
   return res.data;
 }
 
-// 2.2. Xoá (ngưng áp dụng) gói trả góp
-// BE sẽ set active = false, không xoá cứng trong DB
 export async function deactivatePlan(token, id) {
-  const res = await client.delete(`/plans/${id}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+  const res = await client.delete(gw(`/plans/${id}`), {
+    headers: { Authorization: `Bearer ${token}` },
   });
-  return res.data; // trả về PlanResponse với active = false
+  return res.data;
 }
 
-// 3. Dashboard overview
 export async function getDashboardOverview(token) {
-  const res = await client.get("/dashboard/overview", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+  const res = await client.get(gw("/dashboard/overview"), {
+    headers: { Authorization: `Bearer ${token}` },
   });
   return res.data;
 }
 
-// 4. Lấy hồ sơ trả góp
 export async function getApplications(token, filters = {}) {
-  const res = await client.get("/applications", {
-    params: filters,
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") {
+      params.append(k, v);
+    }
   });
+
+  const res = await client.get(gw(`/applications?${params.toString()}`), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
   return res.data;
 }
 
-// 🟢 STATUS MAPPING: FE → BE ENUM
-const STATUS_MAP = {
-  approve: "APPROVED",
-  reject: "REJECTED",
-  pending: "PENDING",
-};
-
-// 5. Cập nhật trạng thái hồ sơ
-export async function updateApplicationStatus(token, id, action) {
-  const status = STATUS_MAP[action];
-
+export async function updateApplicationStatus(token, id, status) {
   const res = await client.put(
-    `/applications/${id}/status`,
+    gw(`/applications/${id}/status`),
     { status },
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${token}` },
     }
   );
 
   return res.data;
 }
 
-// 6. Lấy danh sách hợp đồng
-export async function getContracts(token, filters = {}) {
-  const res = await client.get("/contracts", {
-    params: filters,
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+export async function getContracts(token) {
+  const res = await client.get(gw("/contracts"), {
+    headers: { Authorization: `Bearer ${token}` },
   });
   return res.data;
 }
 
 export async function getContractDetail(token, id) {
-  const res = await client.get(`/contracts/${id}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+  const res = await client.get(gw(`/contracts/${id}`), {
+    headers: { Authorization: `Bearer ${token}` },
   });
   return res.data;
 }
 
-// ========== EXPORT ==========
 const InstallmentApi = {
   getPlans,
   createPlan,
@@ -129,7 +107,7 @@ const InstallmentApi = {
   getApplications,
   updateApplicationStatus,
   getContracts,
-  getContractDetail,  
+  getContractDetail,
 };
 
 export default InstallmentApi;
