@@ -1,26 +1,32 @@
-import React, { useEffect, useState } from 'react'
-import { useAuth } from '../context/AuthContext'
-import { getApplications, updateApplicationStatus } from '../api/installmentApi'
-import { Card, CardHeader } from '../components/ui/Card'
-import { Table, THead, TBody, Th, Td } from '../components/ui/Table'
-import Badge from '../components/ui/Badge'
-import Button from '../components/ui/Button'
-import { SelectInput, TextInput } from '../components/ui/Input'
+import React, { useEffect, useState, useCallback, useRef } from "react"
+import { useAuth } from "../context/AuthContext"
+import { getApplications, updateApplicationStatus } from "../api/installmentApi"
+import { Card, CardHeader } from "../components/ui/Card"
+import { Table, THead, TBody, Th, Td } from "../components/ui/Table"
+import Badge from "../components/ui/Badge"
+import Button from "../components/ui/Button"
+import { SelectInput, TextInput } from "../components/ui/Input"
 
 const STATUS_OPTIONS = [
-  { value: '', label: 'Tất cả' },
-  { value: 'PENDING', label: 'Chờ duyệt' },
-  { value: 'APPROVED', label: 'Đã duyệt' },
-  { value: 'REJECTED', label: 'Từ chối' },
+  { value: "", label: "Tất cả" },
+  { value: "PENDING", label: "Chờ duyệt" },
+  { value: "APPROVED", label: "Đã duyệt" },
+  { value: "REJECTED", label: "Từ chối" },
 ]
+
+// UI action -> backend enum
+const ACTION_TO_STATUS = {
+  approve: "APPROVED",
+  reject: "REJECTED",
+}
 
 function statusBadge(status) {
   switch (status) {
-    case 'PENDING':
+    case "PENDING":
       return <Badge color="warning">Chờ duyệt</Badge>
-    case 'APPROVED':
+    case "APPROVED":
       return <Badge color="success">Đã duyệt</Badge>
-    case 'REJECTED':
+    case "REJECTED":
       return <Badge color="danger">Từ chối</Badge>
     default:
       return <Badge>{status}</Badge>
@@ -31,30 +37,56 @@ export default function ApplicationsPage() {
   const { token } = useAuth()
   const [apps, setApps] = useState([])
   const [loading, setLoading] = useState(true)
-  const [filters, setFilters] = useState({ status: '', q: '' })
+  const [filters, setFilters] = useState({ status: "", q: "" })
   const [updatingId, setUpdatingId] = useState(null)
+
+  // keep a ref to current scroll so we can restore if needed
+  const lastScrollYRef = useRef(0)
 
   // ============================
   // FETCH APPLICATIONS
+  // opts:
+  //  - silent: don't toggle global loading (prevents layout collapse)
+  //  - preserveScroll: restore scroll after data update
   // ============================
-  const fetchApps = async () => {
-    setLoading(true)
-    try {
-      const data = await getApplications(token, {
-        status: filters.status || undefined,
-        q: filters.q || undefined,
-      })
-      setApps(data)
-    } catch (err) {
-      console.error('Failed to fetch applications', err)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const fetchApps = useCallback(
+    async (opts = {}) => {
+      const { silent = false, preserveScroll = false } = opts
+
+      if (preserveScroll) {
+        lastScrollYRef.current = window.scrollY || 0
+      }
+
+      if (!silent) setLoading(true)
+
+      try {
+        const data = await getApplications(token, {
+          status: filters.status || undefined,
+          q: filters.q || undefined,
+        })
+        setApps(data)
+      } catch (err) {
+        console.error("Failed to fetch applications", err)
+      } finally {
+        if (!silent) setLoading(false)
+
+        if (preserveScroll) {
+          // wait for DOM update then restore scroll
+          requestAnimationFrame(() => {
+            window.scrollTo({
+              top: lastScrollYRef.current,
+              behavior: "auto",
+            })
+          })
+        }
+      }
+    },
+    [token, filters.status, filters.q]
+  )
 
   useEffect(() => {
     if (token) fetchApps()
-  }, [token])
+  }, [token, fetchApps])
 
   // ============================
   // FILTER HANDLER
@@ -66,21 +98,29 @@ export default function ApplicationsPage() {
 
   const handleFilterSubmit = (e) => {
     e.preventDefault()
-    fetchApps()
+    fetchApps({ silent: false, preserveScroll: false })
   }
 
   // ============================
   // UPDATE STATUS (APPROVE / REJECT)
   // ============================
-  const handleUpdateStatus = async (id, action) => {
+  const handleUpdateStatus = async (id, action, e) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
     setUpdatingId(id)
     try {
-      // "approve" → "APPROVED", "reject" → "REJECTED"
-      await updateApplicationStatus(token, id, action)
+      const status = ACTION_TO_STATUS[action]
+      if (!status) throw new Error(`Unknown action: ${action}`)
 
-      await fetchApps()
+      await updateApplicationStatus(token, id, status)
+
+      // refresh list WITHOUT collapsing UI + keep scroll
+      await fetchApps({ silent: true, preserveScroll: true })
     } catch (err) {
-      console.error('Update status error:', err)
+      console.error("Update status error:", err)
     } finally {
       setUpdatingId(null)
     }
@@ -125,107 +165,118 @@ export default function ApplicationsPage() {
           </div>
         </form>
 
-        {/* TABLE */}
-        {loading ? (
+        {/* If loading and no data yet -> show text.
+            If already has data -> keep table mounted to avoid scroll jump. */}
+        {loading && apps.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Đang tải hồ sơ...
           </p>
         ) : (
-          <Table>
-            <THead>
-              <tr>
-                <Th>Mã hồ sơ</Th>
-                <Th>Khách hàng</Th>
-                <Th>Sản phẩm</Th>
-                <Th align="right">Giá SP</Th>
-                <Th align="right">Vay</Th>
-                <Th>Đối tác</Th>
-                <Th>Gói</Th>
-                <Th align="center">Trạng thái</Th>
-                <Th align="center">Thao tác</Th>
-              </tr>
-            </THead>
+          <>
+            {loading && apps.length > 0 && (
+              <p className="mb-2 text-xs text-slate-400">
+                Đang cập nhật dữ liệu...
+              </p>
+            )}
 
-            <TBody>
-              {apps.map((app) => (
-                <tr key={app.id}>
-                  <Td>{app.code}</Td>
-
-                  <Td>
-                    <div className="flex flex-col">
-                      <span>{app.customerName}</span>
-                      {app.customerPhone && (
-                        <span className="text-xs text-slate-500 dark:text-slate-400">
-                          {app.customerPhone}
-                        </span>
-                      )}
-                    </div>
-                  </Td>
-
-                  <Td>{app.productName}</Td>
-
-                  <Td align="right">
-                    {app.productPrice?.toLocaleString('vi-VN', {
-                      style: 'currency',
-                      currency: 'VND',
-                      maximumFractionDigits: 0,
-                    })}
-                  </Td>
-
-                  <Td align="right">
-                    {app.loanAmount?.toLocaleString('vi-VN', {
-                      style: 'currency',
-                      currency: 'VND',
-                      maximumFractionDigits: 0,
-                    })}
-                  </Td>
-
-                  <Td>{app.partnerName}</Td>
-                  <Td>{app.planName}</Td>
-
-                  <Td align="center">{statusBadge(app.status)}</Td>
-
-                  <Td align="center">
-                    {app.status === 'PENDING' && (
-                      <div className="flex justify-center gap-2">
-                        <Button
-                          variant="primary"
-                          className="px-2 py-1 text-xs"
-                          disabled={updatingId === app.id}
-                          onClick={() =>
-                            handleUpdateStatus(app.id, 'approve')
-                          }
-                        >
-                          Duyệt
-                        </Button>
-
-                        <Button
-                          variant="danger"
-                          className="px-2 py-1 text-xs"
-                          disabled={updatingId === app.id}
-                          onClick={() =>
-                            handleUpdateStatus(app.id, 'reject')
-                          }
-                        >
-                          Từ chối
-                        </Button>
-                      </div>
-                    )}
-                  </Td>
-                </tr>
-              ))}
-
-              {apps.length === 0 && (
+            <Table>
+              <THead>
                 <tr>
-                  <Td colSpan={9}>
-                    <span className="text-sm text-slate-500 dark:text-slate-400">
-                      Không có hồ sơ nào.
-                    </span>
-                  </Td>
+                  <Th>Mã hồ sơ</Th>
+                  <Th>Khách hàng</Th>
+                  <Th>Sản phẩm</Th>
+                  <Th align="right">Giá SP</Th>
+                  <Th align="right">Vay</Th>
+                  <Th>Đối tác</Th>
+                  <Th>Gói</Th>
+                  <Th align="center">Trạng thái</Th>
+                  <Th align="center">Thao tác</Th>
                 </tr>
-              )}
-            </TBody>
-          </Table>
+              </THead>
+
+              <TBody>
+                {apps.map((app) => (
+                  <tr key={app.id}>
+                    <Td>{app.code}</Td>
+
+                    <Td>
+                      <div className="flex flex-col">
+                        <span>{app.customerName}</span>
+                        {app.customerPhone && (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            {app.customerPhone}
+                          </span>
+                        )}
+                      </div>
+                    </Td>
+
+                    <Td>{app.productName}</Td>
+
+                    <Td align="right">
+                      {app.productPrice?.toLocaleString("vi-VN", {
+                        style: "currency",
+                        currency: "VND",
+                        maximumFractionDigits: 0,
+                      })}
+                    </Td>
+
+                    <Td align="right">
+                      {app.loanAmount?.toLocaleString("vi-VN", {
+                        style: "currency",
+                        currency: "VND",
+                        maximumFractionDigits: 0,
+                      })}
+                    </Td>
+
+                    <Td>{app.partnerName}</Td>
+                    <Td>{app.planName}</Td>
+
+                    <Td align="center">{statusBadge(app.status)}</Td>
+
+                    <Td align="center">
+                      {app.status === "PENDING" && (
+                        <div className="flex justify-center gap-2">
+                          <Button
+                            type="button"
+                            variant="primary"
+                            className="px-2 py-1 text-xs"
+                            disabled={updatingId === app.id}
+                            onClick={(e) =>
+                              handleUpdateStatus(app.id, "approve", e)
+                            }
+                          >
+                            Duyệt
+                          </Button>
+
+                          <Button
+                            type="button"
+                            variant="danger"
+                            className="px-2 py-1 text-xs"
+                            disabled={updatingId === app.id}
+                            onClick={(e) =>
+                              handleUpdateStatus(app.id, "reject", e)
+                            }
+                          >
+                            Từ chối
+                          </Button>
+                        </div>
+                      )}
+                    </Td>
+                  </tr>
+                ))}
+
+                {apps.length === 0 && (
+                  <tr>
+                    <Td colSpan={9}>
+                      <span className="text-sm text-slate-500 dark:text-slate-400">
+                        Không có hồ sơ nào.
+                      </span>
+                    </Td>
+                  </tr>
+                )}
+              </TBody>
+            </Table>
+          </>
         )}
       </Card>
     </div>

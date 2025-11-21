@@ -1,25 +1,37 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
-import { logoutApi } from '../api/identityApi'
+import React, { createContext, useContext, useEffect, useState, useMemo } from "react"
+import { logoutApi } from "../api/identityApi"
 
 const AuthContext = createContext(null)
-const STORAGE_KEY = 'installment_admin_auth'
+const STORAGE_KEY = "installment_admin_auth"
 
 export function AuthProvider({ children }) {
-  const [auth, setAuth] = useState(() => {
+  const [auth, setAuth] = useState({ token: null, user: null })
+  const [bootstrapped, setBootstrapped] = useState(false)
+
+  // Load storage once
+  useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
-      if (!raw) return { token: null, user: null }
-      return JSON.parse(raw)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        setAuth({
+          token: parsed?.token ?? null,
+          user: parsed?.user ?? null,
+        })
+      }
     } catch {
-      return { token: null, user: null }
+      setAuth({ token: null, user: null })
+    } finally {
+      setBootstrapped(true)
     }
-  })
+  }, [])
 
+  // Persist whenever changed (after first load)
   useEffect(() => {
+    if (!bootstrapped) return
     localStorage.setItem(STORAGE_KEY, JSON.stringify(auth))
-  }, [auth])
+  }, [auth, bootstrapped])
 
-  // Nhận token + user từ LoginResponse
   const login = (token, user) => {
     setAuth({ token, user })
   }
@@ -31,27 +43,29 @@ export function AuthProvider({ children }) {
         await logoutApi(currentToken)
       }
     } catch (err) {
-      console.error('Logout API error (ignored):', err)
+      console.error("Logout API error (ignored):", err)
     } finally {
       setAuth({ token: null, user: null })
     }
   }
 
-  const value = {
-    token: auth.token,
-    user: auth.user,
-    isAuthenticated: Boolean(auth.token),
-    login,
-    logout,
-  }
+  const value = useMemo(
+    () => ({
+      token: auth.token,
+      user: auth.user,
+      isAuthenticated: Boolean(auth.token),
+      bootstrapped,
+      login,
+      logout,
+    }),
+    [auth, bootstrapped]
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {
   const ctx = useContext(AuthContext)
-  if (!ctx) {
-    throw new Error('useAuth must be used within AuthProvider')
-  }
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider")
   return ctx
 }

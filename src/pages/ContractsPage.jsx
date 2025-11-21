@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { getContracts, getContractDetail } from '../api/installmentApi'
 import { Card, CardHeader } from '../components/ui/Card'
@@ -49,7 +49,6 @@ function mapPaymentStatus(status) {
   if (upper === 'OVERDUE') return 'Overdue'
   if (upper === 'PLANNED' || upper === 'UNPAID') return 'Unpaid'
 
-  // Nếu BE đã trả sẵn "Paid" / "Unpaid" / "Overdue" thì giữ nguyên
   return status
 }
 
@@ -83,18 +82,9 @@ function ContractDetail({ contract }) {
   const paid = schedule.filter((s) => s.status === 'Paid').length
   const total = schedule.length
 
-  const statusText =
-    contract.status === 'ACTIVE'
-      ? 'Đang hiệu lực'
-      : contract.status === 'CLOSED'
-      ? 'Đã tất toán'
-      : contract.status === 'OVERDUE'
-      ? 'Quá hạn'
-      : contract.status
-
   return (
     <div className="space-y-6">
-      {/* Stats - 3 cards ngang */}
+      {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-blue-50 to-white p-4 dark:border-slate-700 dark:from-blue-950/30 dark:to-slate-900">
           <div className="flex items-center gap-3">
@@ -145,9 +135,9 @@ function ContractDetail({ contract }) {
         </div>
       </div>
 
-      {/* Info + Schedule - 2 cột */}
+      {/* Info + Schedule */}
       <div className="grid gap-6 lg:grid-cols-[1fr,2fr]">
-        {/* Thông tin hợp đồng */}
+        {/* Info */}
         <div className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-700 dark:bg-slate-800/50">
           <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
             <FileText className="h-5 w-5 text-blue-600 dark:text-blue-400" />
@@ -215,7 +205,7 @@ function ContractDetail({ contract }) {
           </div>
         </div>
 
-        {/* Lịch thanh toán */}
+        {/* Schedule */}
         <div className="rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/50">
           <div className="border-b border-slate-200 p-4 dark:border-slate-700">
             <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900 dark:text-white">
@@ -271,8 +261,7 @@ function ContractDetail({ contract }) {
                             {(item.principalAmount != null ||
                               item.interestAmount != null) && (
                               <span className="mt-0.5 text-[11px] font-normal text-slate-500 dark:text-slate-400">
-                                Gốc: {formatMoney(item.principalAmount ?? 0)} •
-                                {' '}
+                                Gốc: {formatMoney(item.principalAmount ?? 0)} •{' '}
                                 Lãi: {formatMoney(item.interestAmount ?? 0)}
                               </span>
                             )}
@@ -303,6 +292,10 @@ export default function ContractsPage() {
   const [filters, setFilters] = useState({ status: '', q: '' })
   const [selectedContract, setSelectedContract] = useState(null)
   const [detailLoadingId, setDetailLoadingId] = useState(null)
+
+  // NEW: ref + highlight for auto scroll
+  const detailRef = useRef(null)
+  const [highlightDetail, setHighlightDetail] = useState(false)
 
   const fetchContracts = async () => {
     setLoading(true)
@@ -341,10 +334,8 @@ export default function ContractsPage() {
     try {
       setDetailLoadingId(contract.id)
 
-      // Gọi BE lấy chi tiết hợp đồng
       const detail = await getContractDetail(token, contract.id)
 
-      // Ưu tiên dùng schedule từ BE; fallback nếu BE đặt tên khác
       const rawSchedule =
         detail?.paymentSchedule ||
         detail?.schedule ||
@@ -353,7 +344,6 @@ export default function ContractsPage() {
 
       const paymentSchedule = buildPaymentSchedule(rawSchedule)
 
-      // Gộp data list + detail để không mất các field FE đang dùng
       const merged = {
         ...contract,
         ...detail,
@@ -367,6 +357,20 @@ export default function ContractsPage() {
       setDetailLoadingId(null)
     }
   }
+
+  // NEW: auto scroll + highlight after detail appears
+  useEffect(() => {
+    if (!selectedContract || !detailRef.current) return
+
+    detailRef.current.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
+
+    setHighlightDetail(true)
+    const t = setTimeout(() => setHighlightDetail(false), 1200)
+    return () => clearTimeout(t)
+  }, [selectedContract])
 
   return (
     <div className="space-y-6">
@@ -473,20 +477,30 @@ export default function ContractsPage() {
         )}
       </Card>
 
+      {/* NEW: wrap card with ref + highlight animation */}
       {selectedContract && (
-        <Card>
-          <CardHeader
-            title="Chi tiết hợp đồng"
-            description={`Thông tin chi tiết và lịch thanh toán cho hợp đồng ${selectedContract.code}`}
-            actions={
-              <Button onClick={() => setSelectedContract(null)} variant="ghost">
-                Đóng
-              </Button>
-            }
-          />
+        <div ref={detailRef}>
+          <Card
+            className={[
+              'transition-all duration-500',
+              highlightDetail
+                ? 'ring-2 ring-blue-400 ring-offset-2 dark:ring-offset-slate-900'
+                : '',
+            ].join(' ')}
+          >
+            <CardHeader
+              title="Chi tiết hợp đồng"
+              description={`Thông tin chi tiết và lịch thanh toán cho hợp đồng ${selectedContract.code}`}
+              actions={
+                <Button onClick={() => setSelectedContract(null)} variant="ghost">
+                  Đóng
+                </Button>
+              }
+            />
 
-          <ContractDetail contract={selectedContract} />
-        </Card>
+            <ContractDetail contract={selectedContract} />
+          </Card>
+        </div>
       )}
     </div>
   )

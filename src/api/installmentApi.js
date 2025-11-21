@@ -72,6 +72,10 @@ export async function getApplications(token, filters = {}) {
   return res.data;
 }
 
+/**
+ * Update trạng thái hồ sơ.
+ * status phải là "APPROVED" | "REJECTED" | "PENDING"
+ */
 export async function updateApplicationStatus(token, id, status) {
   const res = await client.put(
     gw(`/applications/${id}/status`),
@@ -84,8 +88,35 @@ export async function updateApplicationStatus(token, id, status) {
   return res.data;
 }
 
-export async function getContracts(token) {
-  const res = await client.get(gw("/contracts"), {
+/**
+ * Precheck cho site khách.
+ * payload BẮT BUỘC có tenorMonths (kỳ hạn trả góp).
+ */
+export async function precheckApplication(payload) {
+  const res = await client.post(gw("/applications/precheck"), payload);
+  return res.data;
+}
+
+/**
+ * Tạo hồ sơ trả góp mới.
+ * payload BẮT BUỘC có tenorMonths.
+ */
+export async function createApplication(payload) {
+  const res = await client.post(gw("/applications"), payload);
+  return res.data;
+}
+
+// ================== CONTRACTS ==================
+
+export async function getContracts(token, filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") {
+      params.append(k, v);
+    }
+  });
+
+  const res = await client.get(gw(`/contracts?${params.toString()}`), {
     headers: { Authorization: `Bearer ${token}` },
   });
   return res.data;
@@ -104,8 +135,12 @@ const InstallmentApi = {
   updatePlan,
   deactivatePlan,
   getDashboardOverview,
+
   getApplications,
   updateApplicationStatus,
+  precheckApplication,
+  createApplication,
+
   getContracts,
   getContractDetail,
 };

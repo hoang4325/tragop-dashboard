@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { getDashboardOverview } from "../api/installmentApi";
 import { Card, CardHeader } from "../components/ui/Card";
@@ -12,7 +12,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { useNavigate } from "react-router-dom"; // <<< thêm
+import { useNavigate, useLocation } from "react-router-dom"; // <<< add useLocation
 
 /* ================== Utils ================== */
 
@@ -38,11 +38,12 @@ const formatTime = (isoString) => {
 
 export default function DashboardPage() {
   const { token } = useAuth();
-  const navigate = useNavigate();               // <<< thêm
+  const navigate = useNavigate();
+  const location = useLocation(); // <<< add
   const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchOverview = async () => {
+  const fetchOverview = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
@@ -54,12 +55,30 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
+  // ✅ Refetch when token changes OR when navigate back to this page
   useEffect(() => {
     fetchOverview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [fetchOverview, location.key]);
+
+  // ✅ Refetch when tab/window regains focus
+  useEffect(() => {
+    if (!token) return;
+
+    const onFocus = () => fetchOverview();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchOverview();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [token, fetchOverview]);
 
   if (loading) {
     return (
@@ -79,7 +98,6 @@ export default function DashboardPage() {
 
   /* ====== Chuẩn hóa dữ liệu từ API / fallback ====== */
 
-  // 1) % tăng trưởng so với tháng trước
   const growthPercent =
     typeof overview.revenueGrowthPercent === "number"
       ? overview.revenueGrowthPercent
@@ -89,7 +107,6 @@ export default function DashboardPage() {
   )}% so với tháng trước`;
   const growthColor = growthPercent >= 0 ? "text-green-600" : "text-red-600";
 
-  // 2) Dữ liệu biểu đồ: dùng overview.revenueChart nếu có, không thì mock
   const chartDataFromApi = Array.isArray(overview.revenueChart)
     ? overview.revenueChart.map((m) => ({
         name: m.monthLabel ?? m.label ?? "N/A",
@@ -109,9 +126,11 @@ export default function DashboardPage() {
           { name: "T6", revenue: 23900000 },
         ];
 
-  // 3) Hồ sơ chờ duyệt gần nhất
+  // ✅ tolerant mapping for BE fields
   const recentPendingApps = Array.isArray(overview.recentPendingApplications)
     ? overview.recentPendingApplications
+    : Array.isArray(overview.recentPendingApps)
+    ? overview.recentPendingApps
     : [];
 
   return (
@@ -246,10 +265,11 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               </div>
+
               <div className="border-t p-3 text-center">
                 <button
                   className="text-sm font-medium text-blue-600 hover:underline"
-                  onClick={() => navigate("/contracts")} // <<< điều hướng sang trang Hợp đồng
+                  onClick={() => navigate("/applications")} // ✅ go to hồ sơ page
                 >
                   Xem tất cả hồ sơ
                 </button>
